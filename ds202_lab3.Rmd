@@ -1,0 +1,138 @@
+---
+title: "ds202_lab3"
+author: "Zack Johnson"
+date: "9/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Data and Libraries
+```{r}
+library(tidyverse)
+library(readxl)
+library(plyr)
+
+gss <- read_xls('~/ds202/lab3/GSS.xls')
+str(gss)
+```
+
+## Prep data
+```{r}
+gss <- gss %>%
+  rename(c(`Gss year for this respondent` = "year", `Ballot used for interview` = "ballot", `General happiness` = 'happiness', `Political party affiliation` = "party", `Highest year school completed, spouse` = "ed_spouse", `Respondents sex` = "sex", `Highest year school completed, mother` = "ed_mother", `Highest year school completed, father` = "ed_father", `Highest year of school completed` = "ed_respondent", `Marital status` = "marital_status", `Respondent id number` = "id")) %>%
+  mutate(ed_spouse = as.numeric(ed_spouse), ed_mother = as.numeric(ed_mother), ed_father = as.numeric(ed_father), ed_respondent = as.numeric(ed_respondent)) %>%
+  select(-`Percentage of some college educ in occ10 based on acs 2010`) %>%
+  arrange(desc(year))
+
+happiness_bar <- ggplot(data = gss[gss$happiness %in% c("Not too happy", "Pretty happy", "Very happy"),], aes(x = happiness, fill = happiness)) + geom_bar() + scale_fill_manual(values = c("red", "black", "yellow")) + theme(axis.text.x = element_text(angle = 45, vjust = 0.5, size = 8))
+happiness_bar
+```
+
+
+## Exercise 1
+```{r}
+gss_party_ed <- gss[!(gss$party %in% c("Don't know", NA)),] %>%
+  group_by(party) %>%
+  dplyr::summarise(mean = mean(ed_respondent, na.rm = T))
+data.table::data.table(gss_party_ed)
+```
+
+
+## Exercise 2
+```{r}
+better_ed <- gss %>%
+  select(party, ed_respondent) %>%
+  group_by(party) %>%
+  filter(ed_respondent > median(ed_respondent, na.rm = T))
+str(better_ed)
+```
+
+
+## Exericise 3
+```{r}
+gss_happymarriage <- gss %>%
+  mutate(happy_dummy = ifelse(happiness %in% c("Pretty happy", "Very happy"), 1, 0))
+t.test(gss_happymarriage$happy_dummy[gss_happymarriage$marital_status == "Married" & !is.na(gss_happymarriage$happy_dummy)], gss_happymarriage$happy_dummy[gss_happymarriage$marital_status != "Married"& !is.na(gss_happymarriage$happy_dummy)], na.rm = T)
+
+marriagewithhap_bar <- ggplot(data = gss[!(gss$party %in% c("Dont't know","No answer","Other party")) & !(gss$marital_status %in% c("No answer")) & !(gss$happiness %in% c("Don't know", "No answer", "Not applicable", NA)),], aes(x = marital_status, fill = happiness)) + geom_bar(position = "fill") + theme(axis.text.x = element_text(angle = 45, vjust = 0.5, size = 8))
+marriagewithhap_bar
+```
+
+
+## Exercise 4
+```{r}
+gss[!(gss$party %in% c("Don't know", NA)) &
+      !(gss$marital_status %in% c("No answer")),] %>%
+  mutate(happy_dummy = ifelse(happiness %in% c("Pretty happy", "Very happy"), 1, 0)) %>%
+  group_by(party, marital_status) %>%
+  dplyr::summarise(mean_hapiness = mean(happy_dummy)) %>%
+  arrange(desc(mean_hapiness))
+
+partywithhap_bar <- ggplot(data = gss[!(gss$party %in% c("Dont't know","No answer","Other party")) & !(gss$party %in% c("Don't know", NA)) & !(gss$happiness %in% c("Don't know", "No answer", "Not applicable")),], aes(x = party, fill = happiness)) + geom_bar() + theme(axis.text.x = element_text(angle = 45, vjust = 0.5, size = 8))
+partywithhap_bar
+```
+
+## Exercise 5
+
+```{r}
+marriage_ed.lm <- lm(data = gss, formula = ed_respondent ~ as.factor(marital_status))
+anova(marriage_ed.lm)
+
+ggplot(gss[!(gss$marital_status %in% c("No answer", NA)) & !is.na(gss$ed_respondent),], aes(x = marital_status, y = ed_respondent, fill = marital_status)) + geom_boxplot() + theme_classic()
+```
+
+## Exercise 6a: How is party related to education?
+```{r}
+party_ed.lm <- lm(data = gss[!(gss$party %in% c("Dont't know","No answer","Other party")) & !is.na(gss$ed_respondent),], formula = ed_respondent ~ as.factor(party))
+summary(party_ed.lm)
+anova(marriage_ed.lm)
+
+ggplot(gss[!(gss$party %in% c("Dont't know","No answer","Other party")) & !is.na(gss$ed_respondent),], aes(x = party, y = ed_respondent, fill = party)) + geom_boxplot() + theme(axis.text.x = element_text(angle = 45, size = 8, vjust = 0.5)) 
+```
+
+## Exercise 6b: How does parental and spousal education greater than high school relate to whether the respondent is high school education?
+```{r}
+require(ggiraph)
+require(ggiraphExtra)
+require(patchwork)
+require(stargazer)
+relational_ed <- gss[!is.na(gss$ed_mother) & !is.na(gss$ed_father) & !is.na(gss$ed_spouse) & !is.na(gss$ed_respondent),] %>%
+  mutate(is_respondent_educated = ifelse(ed_respondent > 12, 1, 0)) %>%
+  mutate(mother_beyond_hs = ifelse(ed_mother > 12, ed_mother - 12, 0)) %>%
+  mutate(father_beyond_hs = ifelse(ed_father > 12, ed_father - 12, 0)) %>%
+  mutate(spouse_beyond_hs = ifelse(ed_spouse > 12, ed_spouse - 12, 0))
+relational_ed.glm <- glm(data = relational_ed,
+                         family = binomial,
+                         is_respondent_educated ~ 
+                           mother_beyond_hs + 
+                           father_beyond_hs + 
+                           spouse_beyond_hs)
+summary(relational_ed.glm)
+relational_ed.glm2 <- glm(data = relational_ed,
+                         family = binomial,
+                         is_respondent_educated ~ 
+                           father_beyond_hs)
+summary(relational_ed.glm2)
+relational_ed.glm3 <- glm(data = relational_ed,
+                         family = binomial,
+                         is_respondent_educated ~ 
+                           spouse_beyond_hs)
+summary(relational_ed.glm3)
+relational_ed.glm4 <- glm(data = relational_ed,
+                         family = binomial,
+                         is_respondent_educated ~ 
+                           mother_beyond_hs)
+summary(relational_ed.glm4)
+
+ggPredict(relational_ed.glm2)
+ggPredict(relational_ed.glm3)
+ggPredict(relational_ed.glm4)
+
+stargazer(relational_ed.glm, type = "text")
+```
+
+## Summary
+We see that there is a statistical difference between those who are married and those who are some form of not married and those who are married are more happy on average. It seems as thought the key to happiness is to be a center-right married person. Anova is pretty clear that there is significant difference between at least some of the means. Same is true for party but there are groups of parties that, visually, seem to have the exact same distribution. I'm sure a contrast analysis would prove this. Lastly... I got a little carried away with this. I set up a binomial regression model that uses continuous variables of the number of years beyond high school for relations of the respondents to predict whether the respondent graduated high school. It is SUPER significant (which was expected). 
